@@ -1,0 +1,41 @@
+# Build trees
+build/
+build-*/
+out/
+cmake-build-*/
+
+# IDE / tooling
+.vs/
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+CMakeUserPresets.json
+
+# Packages & binaries
+*.zip
+*.exe
+*.dll
+*.lib
+*.a
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+
+# Saves / states / media dumps
+*.sav
+*.state
+*.ppm
+
+# ROMs and logs (do not ship dumps)
+*.nes
+*.unf
+*.fds
+*.log
+*.bmp
+
+# OS
+Thumbs.db
+.DS_Store
