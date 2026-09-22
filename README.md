@@ -1,65 +1,62 @@
 # nesemu-mimo
 
-NTSC NES / Famicom emulator (C++20): CPU / PPU / APU core, Mapper 0/1/2/3/4/7,
-SDL3 desktop with ImGui debugger, headless tools and regression tests.
+NTSC NES / Famicom 模拟器（C++20）：CPU / PPU / APU 核心，Mapper 0/1/2/3/4/7，SDL3 桌面端（含 ImGui 调试器），以及无头测试工具与回归测试。
 
-## Features
+## 功能
 
-- NTSC timing (~29780.5 CPU cycles / frame)
-- iNES and NES 2.0 headers
-- Mappers: NROM, MMC1, UxROM, CNROM, MMC3 (IRQ), AxROM
-- 2A03 CPU (official + common unofficial opcodes)
-- 2C02 PPU (dot-level), 2A03 APU (pulse / triangle / noise / DMC)
-- Dual controllers, battery SRAM, save states, rewind
-- Desktop (SDL3 + ImGui) and headless CLI
+- NTSC 时序（约 29780.5 CPU 周期 / 帧）
+- 支持 iNES 与 NES 2.0 ROM 头
+- Mapper：NROM、MMC1、UxROM、CNROM、MMC3（含 IRQ）、AxROM
+- 2A03 CPU（官方指令 + 常用非官方指令）
+- 2C02 PPU（点级）、APU（脉冲 / 三角 / 噪声 / DMC）
+- 双手柄、电池 SRAM、即时存档、倒带
+- 桌面端与命令行无头工具
 
-## Build
+## 构建
 
 ```powershell
+# 核心 + 单元测试
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev --output-on-failure
 
+# 桌面端
 cmake --preset desktop
 cmake --build --preset desktop
 ```
 
-External test ROMs (optional):
+外部测试 ROM（可选，需 [nes-test-roms](https://github.com/christopherpow/nes-test-roms)）：
 
 ```powershell
-cmake --preset dev -DNESEMU_TEST_ROM_DIR=<nes-test-roms root>
+cmake --preset dev -DNESEMU_TEST_ROM_DIR=<nes-test-roms 路径>
 cmake --build --preset dev
 ctest --preset dev --output-on-failure
 ```
 
-## Run
+## 运行
 
 ```powershell
-.\build\desktop\nesemu_desktop.exe "game.nes"
-.\build\dev\nesemu_headless.exe game.nes 120 shot.bmp
+.\build\desktop\nesemu_desktop.exe "游戏.nes"
+.\build\dev\nesemu_headless.exe 游戏.nes 120 shot.bmp
 ```
 
-## FPS overlay
+## 帧率说明
 
-- **UI xx** — window redraw rate
-- **NES 60Hz** — emulation is paced at 60 frames/s (independent of display refresh)
+- **UI xx**：窗口每秒重绘次数（随显示器刷新变化，例如 60–144）
+- **NES 60Hz**：模拟器按 60 游戏帧/秒推进，与 UI 帧率无关，保证原速
 
-## Docs
+## 文档
 
-- [User guide](docs/USER_GUIDE.md)
-- [Implementation report](docs/IMPLEMENTATION_REPORT.md)
-- [Technical notes](docs/TECHNICAL_IMPLEMENTATION.md)
+- [用户手册](docs/USER_GUIDE.md)
+- [实现报告](docs/IMPLEMENTATION_REPORT.md)
+- [技术实现说明](docs/TECHNICAL_IMPLEMENTATION.md)
 
-## Tests
+## 测试
 
-- Unit tests (30)
+- 单元测试 30 项
 - nestest 8991/8991
-- ppu_vbl_nmi 10/10, apu_test 8/8, mmc3_irq_tests pass
+- ppu_vbl_nmi 10/10、apu_test 8/8、mmc3_irq_tests 通过
 
-## License
+## 许可
 
-Personal / educational use. Commercial ROMs are not included.
-
----
-
-Last updated: push smoke-check — README note for remote verify.
+仅供个人 / 学习使用。仓库不包含商业 ROM。
