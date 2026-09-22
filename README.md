@@ -59,3 +59,7 @@ ctest --preset dev --output-on-failure
 ## License
 
 Personal / educational use. Commercial ROMs are not included.
+
+---
+
+Last updated: push smoke-check — README note for remote verify.
