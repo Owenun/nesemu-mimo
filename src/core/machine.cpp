@@ -180,6 +180,16 @@ void Machine::run_until_frame() {
       break;
     }
     if (cpu_.cycles() - start_cycles > 200000) {
+      // Deadlock escape, but never return a half-painted frame: finish PPU
+      // through vblank so the published buffer is a complete image.
+      u64 guard = 0;
+      while (!frame_advanced_ && guard < 100000) {
+        cpu_.step();
+        ++guard;
+        if (cpu_.jammed()) {
+          break;
+        }
+      }
       frame_advanced_ = true;
       break;
     }

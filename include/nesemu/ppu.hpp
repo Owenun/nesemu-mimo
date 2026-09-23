@@ -29,7 +29,7 @@ public:
   u16 scanline() const { return scanline_; }
   u16 dot() const { return dot_; }
 
-  const Framebuffer& framebuffer() const { return fb_; }
+  const Framebuffer& framebuffer() const { return present_fb_; }
 
   void oam_dma_write(u8 value);
 
@@ -83,7 +83,10 @@ private:
   u16 at_hi_sh_ = 0;
   // Scroll snapshot for the scanline currently being painted.
   u16 line_x_ = 0;  // nametable pixel X for screen x=0
-  u16 line_y_ = 0;  // nametable pixel Y
+  u16 line_y_ = 0;
+  u16 line_cy_ = 0;
+  u16 line_fy_ = 0;
+  u16 line_nty_ = 0;  // nametable pixel Y
   mutable u16 tile_x_ = 0xFFFF;
   mutable u8 tile_lo_ = 0;
   mutable u8 tile_hi_ = 0;
@@ -105,6 +108,7 @@ private:
   bool sprite_zero_hit_possible_ = false;
 
   Framebuffer fb_{};
+  Framebuffer present_fb_{};  // last completed frame (avoids mid-frame tearing)
 
   u8 ntram_read(u16 addr) const;
   void ntram_write(u16 addr, u8 value);
@@ -120,6 +124,7 @@ private:
   void copy_vertical();
   void bg_pixel_at(int x, u8& pix, u8& pal) const;
   mutable u16 cache_key_ = 0xFFFF;
+  mutable u16 cache_sy_ = 0xFFFF;
   void snapshot_scroll();
   void load_background_shifters();
   void shift_background();

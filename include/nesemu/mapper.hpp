@@ -29,9 +29,17 @@ public:
   virtual bool irq_line() const { return false; }
   virtual void clock_ppu() {}
   virtual void observe_ppu_address(u16 addr) { (void)addr; }
+  // MMC3-style scanline counter: one clock per rendered line (stable split).
+  virtual void clock_scanline_irq() {}
 
   virtual void save_state(StateWriter& w) const = 0;
   virtual void load_state(StateReader& r) = 0;
+
+  virtual void dump_debug(char* buf, unsigned cap) const {
+    if (buf && cap) {
+      buf[0] = 0;
+    }
+  }
 
   Cartridge& cart() { return cart_; }
   const Cartridge& cart() const { return cart_; }

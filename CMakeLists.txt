@@ -109,6 +109,7 @@ if(NESEMU_BUILD_TESTS)
     tests/test_cpu.cpp
     tests/test_ppu.cpp
     tests/test_ppu_render.cpp
+    tests/test_ppu_scroll_edges.cpp
     tests/test_apu.cpp
     tests/test_mapper.cpp
     tests/test_mmc3_irq.cpp

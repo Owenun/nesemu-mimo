@@ -15,6 +15,7 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -137,6 +138,16 @@ struct RewindSnapshot {
 
 }  // namespace
 
+static std::function<void(const std::string&)> g_load_rom_cb;
+
+static void open_rom_callback(void* userdata, const char* const* filelist, int filter) {
+  (void)userdata;
+  (void)filter;
+  if (filelist && filelist[0] && g_load_rom_cb) {
+    g_load_rom_cb(std::string(filelist[0]));
+  }
+}
+
 int main(int argc, char** argv) {
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
     std::printf("SDL_Init failed: %s\n", SDL_GetError());
@@ -227,7 +238,8 @@ int main(int argc, char** argv) {
       }
       LocalFree(wargv);
     } else if (argc >= 2) {
-      load_rom_path(argv[1]);
+      g_load_rom_cb = load_rom_path;
+    load_rom_path(argv[1]);
     }
   }
 #else
@@ -237,7 +249,8 @@ int main(int argc, char** argv) {
 #endif
 
   bool running = true;
-  u32 frame_pixels[nesemu::kScreenWidth * nesemu::kScreenHeight];
+  std::vector<u32> frame_pixels(static_cast<std::size_t>(nesemu::kScreenWidth) *
+                                static_cast<std::size_t>(nesemu::kScreenHeight));
 
   while (running) {
     SDL_Event ev;
@@ -247,8 +260,13 @@ int main(int argc, char** argv) {
         running = false;
       }
       if (ev.type == SDL_EVENT_DROP_FILE && ev.drop.data) {
-        load_rom_path(ev.drop.data);
+        const std::string dropped(ev.drop.data);
         SDL_free(const_cast<void*>(static_cast<const void*>(ev.drop.data)));
+        try {
+          load_rom_path(dropped);
+        } catch (...) {
+          std::printf("drop load failed: %s\n", dropped.c_str());
+        }
       }
       if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.repeat == false) {
         switch (ev.key.key) {
@@ -357,7 +375,8 @@ int main(int argc, char** argv) {
         if (ImGui::MenuItem("Open ROM...")) {
           // SDL3 file dialog
           const SDL_DialogFileFilter filters[] = {{"NES ROM", "nes;nez"}, {"All files", "*"}};
-          SDL_ShowOpenFileDialog(nullptr, nullptr, window, filters, 1, nullptr, true);
+          g_load_rom_cb = load_rom_path;
+          SDL_ShowOpenFileDialog(open_rom_callback, nullptr, window, filters, 1, nullptr, true);
         }
         if (ImGui::MenuItem("Reset") && machine) {
           machine->reset();
@@ -473,7 +492,7 @@ int main(int argc, char** argv) {
       for (int i = 0; i < nesemu::kScreenWidth * nesemu::kScreenHeight; ++i) {
         frame_pixels[i] = pal[fb.pixels[static_cast<std::size_t>(i)] & 0x3F];
       }
-      SDL_UpdateTexture(tex, nullptr, frame_pixels, nesemu::kScreenWidth * 4);
+      SDL_UpdateTexture(tex, nullptr, frame_pixels.data(), nesemu::kScreenWidth * 4);
     }
 
     SDL_SetRenderDrawColor(renderer, 16, 16, 20, 255);
@@ -512,6 +531,14 @@ int main(int argc, char** argv) {
     SDL_FRect dst{0, 0, dst_w, dst_h};
     dst.x = (avail_w - dst_w) * 0.5f;
     dst.y = menu_h + (avail_h - dst_h) * 0.5f;
+    // Snap to whole pixels: fractional dest rects make the top/bottom
+    // scanlines resample unevenly while the camera scrolls (edge shimmer).
+    dst.x = std::floor(dst.x);
+    dst.y = std::floor(dst.y);
+    dst.w = std::floor(dst.w);
+    dst.h = std::floor(dst.h);
+    if (dst.w < 1.0f) dst.w = 1.0f;
+    if (dst.h < 1.0f) dst.h = 1.0f;
     if (machine) {
       SDL_RenderTexture(renderer, tex, nullptr, &dst);
     }

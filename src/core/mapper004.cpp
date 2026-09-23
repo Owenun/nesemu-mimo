@@ -1,5 +1,7 @@
 #include "nesemu/mapper.hpp"
 
+#include <cstdio>
+
 namespace nesemu {
 namespace {
 
@@ -9,29 +11,34 @@ public:
 
   u16 mapper_id() const override { return 4; }
 
+  void dump_debug(char* buf, unsigned cap) const override {
+    if (!buf || !cap) return;
+    std::snprintf(buf, cap,
+                  "MMC3 sel=%02X banks=%02X %02X %02X %02X %02X %02X %02X %02X "
+                  "irq lat=%02X cnt=%02X en=%d pend=%d reload=%d a12=%d low=%u clocks=%u mir=%d",
+                  bank_select_, banks_[0], banks_[1], banks_[2], banks_[3], banks_[4], banks_[5],
+                  banks_[6], banks_[7], irq_latch_, irq_counter_, irq_enabled_ ? 1 : 0,
+                  irq_pending_ ? 1 : 0, irq_reload_ ? 1 : 0, a12_high_ ? 1 : 0, a12_low_dots_,
+                  total_clocks_, mirror_ ? 1 : 0);
+  }
+
   Mirroring mirroring() const override {
+    // nesdev MMC3 $A000: 0=vertical, 1=horizontal. Do not invert — that
+    // scrambles nametables (battle screen tile soup).
     return mirror_ ? Mirroring::Horizontal : Mirroring::Vertical;
   }
 
   bool irq_line() const override { return irq_pending_; }
 
   void observe_ppu_address(u16 addr) override {
-    const bool a12 = (addr & 0x1000) != 0;
-    if (!a12) {
-      if (a12_low_dots_ < 255) {
-        ++a12_low_dots_;
-      }
-    }
-    if (a12 && !a12_high_) {
-      if (a12_low_dots_ >= 2) {
-        clock_irq();
-      }
+    // Track A12 only. Scanline IRQ is clocked once per line via
+    // clock_scanline_irq() so splits do not jitter with sprite/tile mix.
+    a12_high_ = (addr & 0x1000) != 0;
+    if (!a12_high_ && a12_low_dots_ < 255) {
+      ++a12_low_dots_;
+    } else if (a12_high_) {
       a12_low_dots_ = 0;
     }
-    if (a12) {
-      a12_low_dots_ = 0;
-    }
-    a12_high_ = a12;
   }
 
   void clock_ppu() override {
@@ -39,6 +46,8 @@ public:
       ++a12_low_dots_;
     }
   }
+
+  void clock_scanline_irq() override { clock_irq(); }
 
   u8 cpu_read(u16 addr) override {
     if (addr >= 0x6000 && addr < 0x8000) {
@@ -159,74 +168,45 @@ private:
 
   std::size_t prg_offset(u16 addr) const {
     const std::size_t size = prg_size();
-    const std::size_t bank8 = size / 0x2000;
-    if (bank8 == 0) {
-      return 0;
-    }
-    const bool prg_mode = (bank_select_ & 0x40) != 0;
-    const u8* b = banks_;
-    std::size_t slot = 0;  // which 8K within $8000-$FFFF
+    const std::size_t n = size / 0x2000;
+    if (n == 0) return 0;
+    const bool mode1 = (bank_select_ & 0x40) != 0;
+    std::size_t slot = 0;
     if (addr < 0xA000) {
-      slot = prg_mode ? 6 : b[6];
+      slot = mode1 ? (n - 2) : banks_[6];
     } else if (addr < 0xC000) {
-      slot = b[7];
+      slot = banks_[7];
     } else if (addr < 0xE000) {
-      slot = prg_mode ? b[6] : (bank8 - 2);
+      slot = mode1 ? banks_[6] : (n - 2);
     } else {
-      slot = bank8 - 1;
+      slot = n - 1;
     }
-    // Use last two banks when fixed indices are hard-coded as 6/7 and bank8 small.
-    if (!prg_mode && addr >= 0xC000 && addr < 0xE000) {
-      slot = bank8 >= 2 ? bank8 - 2 : 0;
-    }
-    if (prg_mode && addr < 0xA000) {
-      slot = bank8 >= 2 ? bank8 - 2 : 0;
-    }
-    if (addr >= 0xE000) {
-      slot = bank8 ? bank8 - 1 : 0;
-    }
-    slot %= bank8;
+    slot %= n;
     return slot * 0x2000 + (addr & 0x1FFF);
   }
 
   std::size_t chr_offset(u16 addr) const {
     const std::size_t size = chr_size();
-    if (size == 0) {
-      return 0;
-    }
+    if (size == 0) return 0;
+    addr = static_cast<u16>(addr & 0x1FFF);
     const bool inv = (bank_select_ & 0x80) != 0;
-    const u8* b = banks_;
-    std::size_t off = 0;
+    std::size_t slot = 0;
+    const std::size_t k = addr / 0x0400;
+    const std::size_t even0 = static_cast<std::size_t>(banks_[0] & 0xFE);
+    const std::size_t even1 = static_cast<std::size_t>(banks_[1] & 0xFE);
     if (!inv) {
-      if (addr < 0x0800) {
-        off = static_cast<std::size_t>(b[0] & 0xFE) * 0x0400 + (addr & 0x07FF);
-      } else if (addr < 0x1000) {
-        off = static_cast<std::size_t>(b[1] & 0xFE) * 0x0400 + (addr & 0x07FF);
-      } else if (addr < 0x1400) {
-        off = static_cast<std::size_t>(b[2]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x1800) {
-        off = static_cast<std::size_t>(b[3]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x1C00) {
-        off = static_cast<std::size_t>(b[4]) * 0x0400 + (addr & 0x03FF);
-      } else {
-        off = static_cast<std::size_t>(b[5]) * 0x0400 + (addr & 0x03FF);
-      }
+      if (k < 2) slot = even0 + k;
+      else if (k < 4) slot = even1 + (k - 2);
+      else slot = banks_[2 + (k - 4)];
     } else {
-      if (addr < 0x0400) {
-        off = static_cast<std::size_t>(b[2]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x0800) {
-        off = static_cast<std::size_t>(b[3]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x0C00) {
-        off = static_cast<std::size_t>(b[4]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x1000) {
-        off = static_cast<std::size_t>(b[5]) * 0x0400 + (addr & 0x03FF);
-      } else if (addr < 0x1800) {
-        off = static_cast<std::size_t>(b[0] & 0xFE) * 0x0400 + (addr & 0x07FF);
-      } else {
-        off = static_cast<std::size_t>(b[1] & 0xFE) * 0x0400 + (addr & 0x07FF);
-      }
+      if (k < 4) slot = banks_[2 + k];
+      else if (k < 6) slot = even0 + (k - 4);
+      else slot = even1 + (k - 6);
     }
-    return off % size;
+    const std::size_t nb = size / 0x0400;
+    if (nb == 0) return 0;
+    slot %= nb;
+    return slot * 0x0400 + (addr & 0x03FF);
   }
 
   u8 banks_[8] = {0, 2, 4, 5, 6, 7, 0, 1};

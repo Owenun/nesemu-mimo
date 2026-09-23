@@ -304,6 +304,9 @@ void Cpu::nmi() { nmi_pending_ = true; }
 void Cpu::irq() { irq_line_ = true; }
 
 void Cpu::interrupt(u16 vector, bool brk) {
+  if (vector == 0xFFFA) {
+    ++nmi_count_;
+  }
   (void)read8(pc_);  // dummy opcode fetch
   (void)read8(pc_);
   push16(pc_);

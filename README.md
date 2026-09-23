@@ -60,3 +60,12 @@ ctest --preset dev --output-on-failure
 ## 许可
 
 仅供个人 / 学习使用。仓库不包含商业 ROM。
+
+
+## 文档
+
+- [实现报告](docs/IMPLEMENTATION_REPORT.md)
+- [使用手册](docs/USER_GUIDE.md)
+- [测试报告](docs/TEST_REPORT.md)
+- [缺陷报告](docs/BUG_REPORT.md)
+- [技术说明](TECHNICAL_IMPLEMENTATION.md)

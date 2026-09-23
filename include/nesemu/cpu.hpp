@@ -36,6 +36,7 @@ public:
 
   bool jammed() const { return jammed_; }
   u64 cycles() const { return cycles_; }
+  u64 nmi_count() const { return nmi_count_; }
   void set_cycles(u64 c) { cycles_ = c; }
 
   u8 a() const { return a_; }
@@ -117,6 +118,7 @@ private:
 
   // Interrupt lines sampled just before each instruction fetch.
   bool nmi_pending_ = false;
+  u64 nmi_count_ = 0;
   bool irq_line_ = false;
 
   u8 fetch8();

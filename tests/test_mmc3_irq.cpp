@@ -45,14 +45,12 @@ NE_TEST(mmc3_irq_clocks_on_a12) {
 
   NE_CHECK(!mapper->irq_line());
 
-  // A12 rise #1: reload counter=latch=1
-  ppu_set_addr(ppu, 0x0000);
-  ppu_set_addr(ppu, 0x1000);
+  // Scanline clock #1: reload counter=latch=1
+  mapper->clock_scanline_irq();
   NE_CHECK(!mapper->irq_line());
 
-  // A12 rise #2: counter 1→0 → IRQ
-  ppu_set_addr(ppu, 0x0000);
-  ppu_set_addr(ppu, 0x1000);
+  // Scanline clock #2: counter 1→0 → IRQ
+  mapper->clock_scanline_irq();
   NE_CHECK(mapper->irq_line());
 
   mapper->cpu_write(0xE000, 0);  // ack
@@ -70,7 +68,32 @@ NE_TEST(mmc3_irq_latch_zero_fires_immediately) {
   mapper->cpu_write(0xC001, 0);
   mapper->cpu_write(0xE001, 0);
 
-  ppu_set_addr(ppu, 0x0000);
-  ppu_set_addr(ppu, 0x1000);  // clock: reload 0 → IRQ
+  mapper->clock_scanline_irq();  // reload 0 → IRQ
   NE_CHECK(mapper->irq_line());
+}
+
+NE_TEST(mmc3_irq_ignores_short_a12_glitch) {
+  auto cart = Cartridge::from_bytes(make_ines(1, 0, 4));
+  auto mapper = Mapper::create(*cart);
+  Ppu ppu;
+  ppu.connect(mapper.get());
+  ppu.reset();
+
+  mapper->cpu_write(0xC000, 0);
+  mapper->cpu_write(0xC001, 0);
+  mapper->cpu_write(0xE001, 0);
+
+  mapper->clock_scanline_irq();
+  NE_CHECK(mapper->irq_line());
+  mapper->cpu_write(0xE000, 0);
+
+  // Pattern A12 edges alone must not clock the scanline counter.
+  mapper->cpu_write(0xC000, 5);
+  mapper->cpu_write(0xC001, 0);
+  mapper->cpu_write(0xE001, 0);
+  ppu_set_addr(ppu, 0x0000);
+  ppu_set_addr(ppu, 0x1000);
+  ppu_set_addr(ppu, 0x0000);
+  ppu_set_addr(ppu, 0x1000);
+  NE_CHECK(!mapper->irq_line());
 }

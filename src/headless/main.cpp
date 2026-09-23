@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -219,17 +220,57 @@ int main(int argc, char** argv) {
   std::printf("prg: %u KiB  chr: %u KiB\n", h.prg_rom_size / 1024, h.chr_rom_size / 1024);
 
   if (autoplay) {
-    machine->set_controller_state(0, 0x08);  // Start
+    machine->set_controller_state(0, 0);
+  }
+
+  const char* seq_dir = nullptr;
+  int seq_every = 0;
+  (void)seq_dir;
+  // extra args: seq <every> <dirprefix>
+  if (argc >= 7 && std::strcmp(argv[5], "seq") == 0) {
+    seq_every = std::atoi(argv[6]);
   }
 
   for (int i = 0; i < frames; ++i) {
+    // Logo → mash dialogue → outside → grass/river up-down walk.
+    if (autoplay) {
+      u8 pad = 0;
+      if (i >= 70 && i < 76) {
+        pad = 0x08;  // Start
+      } else if (i < 700) {
+        // More aggressive dialogue / confirm mash (edge-triggered presses).
+        const int ph = i % 10;
+        pad = (ph < 2) ? 0x01 : 0;
+      } else if (i < 780) {
+        pad = 0x20;  // Down
+      } else if (i < 860) {
+        pad = 0x10;  // Up
+      } else if (i < 940) {
+        pad = 0x40;  // Left
+      } else if (i < 1020) {
+        pad = 0x80;  // Right
+      } else {
+        // River grass: alternate up/down with short pauses (edge presses)
+        const int ph = i % 40;
+        pad = (ph < 8) ? 0x20 : (ph >= 20 && ph < 28) ? 0x10 : 0;
+      }
+      machine->set_controller_state(0, pad);
+    }
     machine->run_until_frame();
     if (machine->cpu().jammed()) {
       std::printf("CPU jammed at frame %d\n", i);
       break;
     }
-    if (autoplay) {
-      machine->set_controller_state(0, 0);
+    if (seq_every > 0 && (i % seq_every == 0 || i == frames - 1)) {
+      char name[256];
+      std::snprintf(name, sizeof(name), "build\\pkseq_%04d.bmp", i);
+      write_bmp(name, machine->framebuffer());
+    }
+    // Native 256x240 dumps during river up/down walk.
+    if (seq_every > 0 && i >= 1020) {
+      char name[256];
+      std::snprintf(name, sizeof(name), "build\\nes_%04d.bmp", i);
+      write_bmp(name, machine->framebuffer());
     }
   }
 

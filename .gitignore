@@ -35,6 +35,13 @@ CMakeUserPresets.json
 *.fds
 *.log
 *.bmp
+*.mp4
+*.wav
+
+# Ad-hoc analysis scripts and dumps (not product code)
+tests/data/*.py
+tests/data/*.txt
+build/
 
 # OS
 Thumbs.db

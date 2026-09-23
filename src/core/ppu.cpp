@@ -270,19 +270,19 @@ void Ppu::increment_x() {
 void Ppu::increment_y() {
   if ((v_ & 0x7000) != 0x7000) {
     v_ = static_cast<u16>(v_ + 0x1000);
-  } else {
-    v_ = static_cast<u16>(v_ & ~0x7000);
-    u16 y = static_cast<u16>((v_ & 0x03E0) >> 5);
-    if (y == 29) {
-      y = 0;
-      v_ ^= 0x0800;
-    } else if (y == 31) {
-      y = 0;
-    } else {
-      y++;
-    }
-    v_ = static_cast<u16>((v_ & ~0x03E0) | (y << 5));
+    return;
   }
+  v_ = static_cast<u16>(v_ & ~0x7000);
+  u16 y = static_cast<u16>((v_ & 0x03E0) >> 5);
+  if (y == 29) {
+    y = 0;
+    v_ = static_cast<u16>(v_ ^ 0x0800);
+  } else if (y == 31) {
+    y = 0;
+  } else {
+    y = static_cast<u16>(y + 1);
+  }
+  v_ = static_cast<u16>((v_ & ~0x03E0) | (y << 5));
 }
 
 void Ppu::copy_horizontal() {
@@ -308,15 +308,16 @@ void Ppu::bg_pixel_at(int x, u8& pix, u8& pal) const {
   const u16 sx = static_cast<u16>(line_x_ + x);
   const u16 sy = line_y_;
   const u16 nt_x = static_cast<u16>((sx >> 8) & 1);
-  const u16 nt_y = static_cast<u16>((sy >> 8) & 1);
   const u16 coarse_x = static_cast<u16>((sx >> 3) & 0x1F);
-  const u16 coarse_y = static_cast<u16>((sy >> 3) & 0x1F);
   const u16 fine_x = static_cast<u16>(sx & 7);
-  const u16 fine_y = static_cast<u16>(sy & 7);
+  const u16 nt_y = line_nty_;
+  const u16 coarse_y = line_cy_;
+  const u16 fine_y = line_fy_;
   const u16 key = static_cast<u16>(sx >> 3);  // tile column in 512px space
-  // Cache the current tile's pattern/attr (const method mutates mutable cache).
-  if (key != cache_key_ || fine_y != tile_fine_y_) {
+  // Cache must track the tile row too: fine_y repeats every 8 scanlines.
+  if (key != cache_key_ || fine_y != tile_fine_y_ || sy != cache_sy_) {
     cache_key_ = key;
+    cache_sy_ = sy;
     tile_fine_y_ = static_cast<u8>(fine_y);
     const u16 nt = static_cast<u16>(0x2000 | (nt_y << 11) | (nt_x << 10) | (coarse_y << 5) | coarse_x);
     const u8 tile = ntram_read(nt);
@@ -340,11 +341,28 @@ void Ppu::bg_pixel_at(int x, u8& pix, u8& pal) const {
 }
 
 void Ppu::snapshot_scroll() {
-  // X comes from t_ + fine X: v_ has been advanced by the end-of-line prefetch.
-  // Y comes from v_ (already incremented per scanline via increment_y).
+  // Drop any cached tile from the previous scanline — top/bottom rows were
+  // able to reuse it when fine_y/line_y aliased under camera scroll.
+  cache_key_ = 0xFFFF;
+  cache_sy_ = 0xFFFF;
+  tile_fine_y_ = 0xFF;
+  // X from t_ + fine X (v_ is advanced by end-of-line prefetch).
   line_x_ = static_cast<u16>(((t_ & 0x1F) << 3) + x_ + (((t_ >> 10) & 1) << 8));
-  line_y_ = static_cast<u16>((((v_ >> 5) & 0x1F) << 3) + ((v_ >> 12) & 7) +
-                             (((v_ >> 11) & 1) << 8));
+  // Y from v_ for this scanline (coarse_y is 5 bits; nametable rows are 30).
+  u16 coarse_y = static_cast<u16>((v_ >> 5) & 0x1F);
+  const u16 fine_y = static_cast<u16>((v_ >> 12) & 7);
+  u16 nt_y = static_cast<u16>((v_ >> 11) & 1);
+  // Rows 30-31 are past the 30-row nametable. Fold them into the next
+  // nametable so the opposite edge of the map does not wrap onto this screen
+  // (bottom building appearing at the top when the camera scrolls).
+  if (coarse_y >= 30) {
+    coarse_y = static_cast<u16>(coarse_y - 30);
+    nt_y = static_cast<u16>(nt_y ^ 1);
+  }
+  line_cy_ = coarse_y;
+  line_fy_ = fine_y;
+  line_nty_ = nt_y;
+  line_y_ = static_cast<u16>(nt_y * 240 + (coarse_y * 8) + fine_y);
 }
 
 void Ppu::evaluate_sprites(int target_y) {
@@ -417,6 +435,15 @@ void Ppu::evaluate_sprites(int target_y) {
     status_ = static_cast<u8>(status_ | 0x20);  // overflow (approximate)
   }
   sprite_count_ = static_cast<u8>(n);
+  // PPU still fetches pattern data for unused sprite slots (dummy fetches).
+  // Those reads toggle A12 and are required for MMC3 scanline IRQ.
+  {
+    const u16 base = sp_pattern_base();
+    for (int i = n; i < 8; ++i) {
+      (void)read_vram(base);
+      (void)read_vram(static_cast<u16>(base + 8));
+    }
+  }
 }
 
 u8 Ppu::pixel_color(u8 bg_pixel, u8 bg_pal, u8 sp_pixel, u8 sp_pal, bool sp_priority,
@@ -496,6 +523,24 @@ void Ppu::tick() {
   const bool pre_render = scanline_ == 261;
   const bool render_line = visible_line || pre_render;
 
+  // Hardware: t→v Y copy happens on pre-render only while rendering is on.
+  // Do not force this when rendering is off — games use $2006 as a VRAM
+  // pointer then, and overwriting v_ from t_ destroys scroll (full-screen junk).
+  if (pre_render && rendering_enabled() && dot_ >= 280 && dot_ <= 304) {
+    copy_vertical();
+  }
+
+  // One MMC3 scanline clock per visible line, even if rendering is briefly
+  // off (games blank to update VRAM while the camera scrolls). Skipping those
+  // lines shifted the IRQ split and made the playfield top/bottom flash.
+  if (dot_ == 256 && visible_line && mapper_) {
+    mapper_->clock_scanline_irq();
+  }
+
+  if (visible_line && dot_ == 1) {
+    snapshot_scroll();
+  }
+
   if (render_line && rendering_enabled()) {
     // Keep v_ incrementing for MMC3 A12 / mid-frame scroll; BG pixels use snapshot.
     const bool fetch_cycle =
@@ -531,9 +576,6 @@ void Ppu::tick() {
       }
     }
 
-    if (visible_line && dot_ == 1) {
-      snapshot_scroll();
-    }
     if (visible_line && dot_ >= 1 && dot_ <= 256) {
       render_pixel();
     }
@@ -553,9 +595,6 @@ void Ppu::tick() {
         }
       }
     }
-    if (pre_render && dot_ >= 280 && dot_ <= 304) {
-      copy_vertical();
-    }
   } else if (visible_line && dot_ >= 1 && dot_ <= 256) {
     u8 color = palette_read(0);
     if (mask_ & 0x01) {
@@ -569,6 +608,9 @@ void Ppu::tick() {
     status_ = static_cast<u8>(status_ | 0x80);
     frame_ready_ = true;
     nmi_output_ = ((status_ & 0x80) != 0) && ((control_ & 0x80) != 0);
+    // Publish only complete frames. Presenting the draw buffer mid-frame
+    // mixed the next frame's top rows with this frame's bottom (scroll tear).
+    present_fb_ = fb_;
   }
   if (scanline_ == 261 && dot_ == 1) {
     status_ = static_cast<u8>(status_ & ~0xE0);
@@ -577,7 +619,7 @@ void Ppu::tick() {
 
   ++dot_;
   bool skip = false;
-  if (scanline_ == 261 && dot_ == 340 && odd_frame_ && rendering_enabled()) {
+  if (scanline_ == 261 && dot_ == 339 && odd_frame_ && rendering_enabled()) {
     skip = true;
   }
   if (dot_ > 340 || skip) {
